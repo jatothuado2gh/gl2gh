@@ -1,6 +1,5 @@
 # GitLab → GitHub Migration
 
-
 ## 1. Executive Summary – Objective
 This document provides detailed procedures to migrate source code repositories from **GitLab Server** to **GitHub**.
 
@@ -8,13 +7,8 @@ This document provides detailed procedures to migrate source code repositories f
 
 ### 2.1 GitHub Runner Host Requirements
 - **OS:** Ubuntu
-- **Docker:** latest stable
-- **Node.js:** v20+
-- **npm:** v10+
-- **Docker image:** `gl-exporter`
 
 ### 2.2 Access Requirements
-- **Password-less sudo** configured for the user running the **GitHub Runner** process
 - **GitHub access** to:
   - View migration scripts stored in the project
   - Trigger the pipeline
@@ -35,34 +29,13 @@ Required scopes:
 - `user`
 
 ### 2.4 Enable GitHub Object Storage Feature Flag
-- GitHub object storage feature flag must be enabled both for GitHub handle and GitHub organizations. Raise a request with GitHub Support to enable this feature.
+ - GitHub object storage feature flag must be enabled for both the GitHub enterprise/account handle and the target GitHub organizations.
 
 ### 2.5 Intermediate Storage for Archive Files
 - GitHub Storage (up to 30 GB)
 - Azure / AWS Storage (up to 40 GB)
-- **GitHub Cloud with Data Residency requires Azure or AWS storage**
 
-### 2.6 Install GH CLI
-- Install GitHub CLI by following the link below
-```
-https://github.com/cli/cli#installation
-```
-
-### 2.7 Install GH CLI extensions
-- Install gh-gitlab-stats CLI extension by running below command. This extension is required for generating inventory reports.
-```
-gh extension install https://github.com/mona-actions/gh-gitlab-stats
-```
-- Install gh-migration-monitor CLI extension by running below command. This extension is required to monitor the status of migrations.
-```
-gh extension install https://github.com/mona-actions/gh-migration-monitor
-```
-- Install the gh-ado2gh CLI extension. This extension is required to generate mannequins (user identity mapping) CSV files, reclaim mannequins, and wait for/check the migration status.
-```
-gh extension install https://github.com/github/gh-ado2gh
-```
-
-### 2.8 Network configuration
+### 2.6 Network configuration
 - The customer is required to configure the allow IP lists according to their implementation. The following documentation will assist with configuration if it has not yet been completed.
 ```
 https://docs.github.com/en/enterprise-cloud@latest/migrations/ado/managing-access-for-a-migration-from-azure-devops#configuring-ip-allow-lists-for-migrations
@@ -70,7 +43,7 @@ https://docs.github.com/en/enterprise-cloud@latest/migrations/ado/managing-acces
 
 ## 3. Repository Contents
     .
-    ├── .github/workflows/gl-to-ghmigration.yml
+    ├── .github/workflows/gl-to-gh-migration.yml
     ├── README.md
     ├── config.sh
     ├── runner.sh
@@ -88,7 +61,6 @@ https://docs.github.com/en/enterprise-cloud@latest/migrations/ado/managing-acces
         ├── index.js
         ├── issue.js
         ├── migration.js
-        ├── package.json
         ├── repository.js
         ├── start-repo-migration.js
         ├── state.js
@@ -136,34 +108,16 @@ This directory contains JavaScript modules used to orchestrate GitHub migration 
 
 ## 5. Pre-Migration
 
-### 5.1 Build gl-exporter Docker Image
-- Copy gl_exporter folder to the server where the migration commands will be executed.
-- Build the `gl-exporter` Docker image using the `docker build` command
-```bash
-cd gl_exporter
-sudo docker build --no-cache=true -t gl-exporter .
-```
-- Verify the image creation using the `docker images` command.
-
-**Example output:**
-
-```bash
-root@GLMigration:/opt/migration2ghscripts_new# docker images
-REPOSITORY    TAG       IMAGE ID       CREATED        SIZE
-gl-exporter   latest    5e168437a7a1   12 hours ago   1.51GB
-ruby          3.2.1     3440a912810a   2 years ago    893MB
-```
-
-### 5.2 Generate inventory CSV
+### 5.1 Generate inventory CSV
 Before triggering the pipeline, generate an inventory file using the GitHub CLI extension `gitlab-stats`:
 
 ```bash
-gh gitlab-stats --hostname "$SOURCE_GL_SERVER_URL" --token "$GITLAB_API_PRIVATE_TOKEN" --namespace <gitlab-group>
+gh gitlab-stats --hostname "gitlab.company.com" --token "glpat-xxxx" --namespace my-gitlab-group
 ```
 
 This produces a CSV inventory of repositories.
 
-### 5.3 Edit inventory CSV
+### 5.2 Edit inventory CSV
 After generation, edit the CSV and add two columns:
 - `github_org`
 - `github_repo`
@@ -174,8 +128,8 @@ Fill in the target GitHub organization and repository name for each row.
 
 | Namespace | Project | Commit_Count | Branch_Count | Full_URL | github_org | github_repo |
 | -------- | -------- | -------- | -------- | -------- | -------- | -------- |
-| demo-group/sub-group | demo-project | 20 | 1 | http://gitlab-server/demo-group/sub-group/demo-project | kcghorg | demoproject |
-| demo-group-1/sub-group-1 | demo-project-1 | 20 | 1 | http://gitlab-server/demo-group/sub-group/demo-project-1 | kcghorg | demoproject1 |
+| demo-group/sub-group | demo-project | 20 | 1 | http://gitlab-server/demo-group/sub-group/demo-project | ghorg | demoproject |
+| demo-group-1/sub-group-1 | demo-project-1 | 20 | 1 | http://gitlab-server/demo-group/sub-group/demo-project-1 | ghorg | demoproject1 |
 
 **Notes**
 - The example shows only the minimum required columns.
@@ -184,113 +138,103 @@ Fill in the target GitHub organization and repository name for each row.
 - Upload the CSV to the GitHub repository.
 - This file name will be passed as the `INVENTORY_FILE` user input when running the pipeline.
 
-### 5.4 Upload inventory to GitHub repository
+### 5.3 Upload inventory to GitHub repository
 Upload the updated CSV into the GitHub repository (so the pipeline can access it).
 
 ## 6. CI/CD Variable Setup (GitHub)
-Configure CI/CD variables in:
+Configure CI/CD secrets and variables in:
+
+**GitHub Repository → Settings → Secrets and Variables → Actions → New repository variable**
+
+| Name | Value |
+|--------|-------------|
+| `SOURCE_GL_SERVER_URL` | `https://gitlab.company.com` |
+| `GITLAB_USERNAME` | `gitlab-user` |
+| `GH_HOST` | `github.com (or) SUBDOMAIN.ghe.com` |
+| `STORAGE_TYPE` | `GITHUB (or) AZURE (or) AWS` |
+
 **GitHub Repository → Settings → Secrets and Variables → Actions → New Repository Secret**
 
-### For GitHub Enterprise Cloud
- 
-| Key                      | Example Value              | Description                  |
-|--------------------------|----------------------------|------------------------------|
-| SOURCE_GL_SERVER_URL     | https://gitlab.company.com | GitLab Server URL            |
-| GITLAB_USERNAME          | gitlab-user                | GitLab username              |
-| GITLAB_API_PRIVATE_TOKEN | glpat-xxxxxxx              | GitLab API private token     |
-| GH_PAT                   | ghp_xxxxx                  | GitHub Personal Access Token |
-| GH_ORG                   | myghorg                    | GitHub organization name     |
+| Name | Secret |
+|--------|-------------|
+| `GITLAB_API_PRIVATE_TOKEN` | `glpat-xxxxxxx` |
+| `GH_PAT` | `ghp_xxxxx` |
 
 
-### For GitHub Enterprise Cloud with Data Residency
+- If storage type is Azure,
+**GitHub Repository → Settings → Secrets and Variables → Actions → New repository variable**
 
-| Key                      | Example Value              | Description                  |
-|--------------------------|----------------------------|------------------------------|
-| `SOURCE_GL_SERVER_URL`   | `https://gitlab.company.com` | GitLab Server URL          |
-| `GITLAB_USERNAME`        | `gitlab-user`              | GitLab username              |
-| `GITLAB_API_PRIVATE_TOKEN` | `glpat-xxxxxxx`          | GitLab API private token     |
-| `GH_PAT`                 | `ghp_xxxxx`               | GitHub Personal Access Token |
-| `GH_ORG`                 | `myghorg`                 | GitHub organization name     |
-| `GH_SERVER_URL`          | `https://SUBDOMAIN.ghe.com` | GitHub Server URL          |
-| `GH_API_URL`             | `https://api.SUBDOMAIN.ghe.com` | GitHub API URL        |
-| `STORAGE_TYPE`           | `AZURE or AWS`            | Intermediate storage type    |
+| Name | Value |
+|--------|-------------|
+| `AZ_CONTAINER` | `container-name` |
 
+**GitHub Repository → Settings → Secrets and Variables → Actions → New Repository Secret**
 
-- If storage type is Azure, export the following env
+| Name | Secret |
+|--------|-------------|
+| `AZURE_STORAGE_CONNECTION_STRING` | `connection-string` |
 
-## Azure Storage Configuration
+- If storage type is AWS
+**GitHub Repository → Settings → Secrets and Variables → Actions → New repository variable**
+  
+| Name | Value |
+|--------|-------------|
+| `AWS_BUCKET_NAME` | `aws-bucket` |
+| `AWS_REGION` | `us-west` |
 
-| Key                                | Example Value      | Description                         |
-|------------------------------------|--------------------|-------------------------------------|
-| `AZ_CONTAINER`                     | `container-name`   | Azure container name                |
-| `AZURE_STORAGE_CONNECTION_STRING`  | `connection-string`| Azure storage connection string     |
+**GitHub Repository → Settings → Secrets and Variables → Actions → New Repository Secret**
 
+| Name | Secret |
+|--------|-------------|
+| `AWS_SECRET_ACCESS_KEY` | `aws-key` |
+| `AWS_ACCESS_KEY_ID` | `access-id` |
 
-- If storage type is AWS, export the following env
-
-## AWS Storage Configuration
-
-| Key                       | Example Value  | Description                  |
-|---------------------------|----------------|------------------------------|
-| `AWS_BUCKET_NAME`         | `aws-bucket`   | AWS bucket name              |
-| `AWS_REGION`              | `us-west`      | AWS region                   |
-| `AWS_SECRET_ACCESS_KEY`   | `aws-key`      | AWS secret access key        |
-| `AWS_ACCESS_KEY_ID`       | `access-id`    | AWS access key ID            |
-
-## 6.1 Setup environment for readiness approval process
+## 7. Setup environment for readiness approval process
 Configure Environment in:
 **GitHub Repository → Settings → Environment → New Environment**
 Give name as **approve-after-readiness-check**
 
-## 7. Pipeline Flow
-1. Validate CI/CD inputs, configuration, and prerequisites
-2. Run readiness check to check active merge requests and running pipelines
-3. Pause for manual approval (review readiness output before proceeding)
-4. Generate GitLab repository migration archives
-5. Upload migration archives to intermediate storage
-6. Initiate GitHub repository migrations using uploaded archives
-7. Display final migration summary (successes, failures, and migration IDs)
-8. Preserve logs, reports, and outputs as pipeline artifacts
+## 8. Pipeline Flow
+1. Install required tools
+2. Validate CI/CD inputs, configuration, and prerequisites
+3. Run readiness check to check active merge requests and running pipelines
+4. Pause for manual approval (review readiness output before proceeding)
+5. Generate GitLab repository migration archives
+6. Upload migration archives to intermediate storage
+7. Initiate GitHub repository migrations using uploaded archives
+8. Display final migration summary (successes, failures, and migration IDs)
+9. Preserve logs, reports, and outputs as pipeline artifacts
 
-### 7.1 Runner Tag Configuration
-- This pipeline uses the GitHub Runner label **`GLMigration`** to select the appropriate runner for execution.
-- The runner **must be updated to match the GitHub Runner configured in your environment**.
-
-#### Example
-If your GitHub Runner is registered with the label:
-- `github-runner-dev`
-
-Then update the `runs-on:` section in `.gl-to-gh-migration.yml` to match the runner for that environment.
-
-```yaml
-  runs-on: ["github-runner-dev"]
-```
-
-### 7.2 Pipeline Trigger
+### 8.1 Pipeline Trigger
 The pipeline is **manually triggered** from GitHub.
 
-### 7.3 Executing the Pipeline
+### 8.2 Executing the Pipeline
 1. Open the GitHub repository
 2. Navigate to **Actions → GitLab to GitHub Migration Pipeline**
 3. Select **Run workflow**
 4. Provide inputs
+    - Select the right branch
+
     - GitLab Stats file generated using gitlab-stats gh extension
       - Value: `<your-inventory-file>.csv`
 
     - Enter the GitHub type: `GitHub` for GitHub Enterprise Cloud and `GitHubDR` for GitHub Enterprise Cloud with Data Residency
       - Value: `GitHub (or) GitHubDR`
 
+    - Enter the Runner Label:
+      - Value: `Example: self-hosted`
+
 5. Select **Run workflow** to start
 
-### 7.4 Artifacts and Retention
+### 8.3 Artifacts and Retention
 The pipeline uploads artifacts to support troubleshooting, including:
 - Output files
 - Migration logs
 
-## 8. Monitor the status of migration
+## 9. Monitor the status of migration
 - After executing migrations, it’s critical to monitor the progress and validate completion for each repository. This section outlines how to check migration status using the GitHub CLI and how to install and run a monitoring tool for real-time visibility.
 
-### 8.1 Check Migration Status by Migration ID
+### 9.1 Check Migration Status by Migration ID
 - For GitHub Enterprise Cloud without Data Residency:
 ```
 gh ado2gh wait-for-migration --migration-id <migration-id>
@@ -298,13 +242,13 @@ gh ado2gh wait-for-migration --migration-id <migration-id>
 
 - GitHub Enterprise Cloud with Data Residency:
 ```
-gh ado2gh wait-for-migration --migration-id <migration-id> --target-api-url "$GH_API_URL"
+gh ado2gh wait-for-migration --migration-id <migration-id> --target-api-url "https://api.SUBDOMAIN.ghe.com"
 ```
 
-### 8.2 Monitor migrations with GitHub Extension (gh-migration-monitor)
+### 9.2 Monitor migrations with GitHub Extension (gh-migration-monitor)
 - For GitHub Enterprise Cloud without Data Residency:
 ```
-gh migration-monitor --organization $GH_ORG --github-token $GH_PAT
+gh migration-monitor --organization GH_ORG --github-token GH_PAT
 ```
 
 - GitHub Enterprise Cloud with Data Residency:
@@ -312,8 +256,8 @@ gh migration-monitor --organization $GH_ORG --github-token $GH_PAT
 Migration-monitor extension is not supported in GitHub Cloud with Data Residency.
 ```
 
-## 9. Post Migration Validation
-- Run the below steps to perform migration validation
+## 10. Post Migration Validation
+- Run the following steps to perform migration validation.
 
 ```bash
 export INVENTORY_FILE="<your-inventory-file>.csv"
@@ -324,9 +268,9 @@ export GH_TOKEN="<github_pat>"
 - This script validates migration accuracy by comparing branch counts, commit counts, and repository metadata between GitLab and the corresponding GitHub repositories using the GitHub API.
 
 
-## 10. User Identity Mapping (Mannequins)
+## 11. User Identity Mapping (Mannequins)
 
-### 10.1 Generate mannequins
+### 11.1 Generate mannequins
 
 #### For GitHub Enterprise Cloud without Data Residency:
 
@@ -341,7 +285,7 @@ gh ado2gh generate-mannequin-csv --github-org "{github-org}"
 gh ado2gh generate-mannequin-csv --github-org "{github-org}" --target-api-url https://api.SUBDOMAIN.ghe.com
 ```
 
-### 10.2 Update Mannequin Mapping
+### 11.2 Update Mannequin Mapping
 - Open `mannequins.csv`
 - Populate the **Target User** column with valid GitHub usernames
 
@@ -361,7 +305,7 @@ Each GitLab user (represented as a mannequin in GitHub) is mapped to the corresp
 - The `target-user` column is updated with the correct GitHub username.
 - This mapping is later used to reclaim mannequins and correctly associate commits, issues, and comments with real GitHub users.
 
-### 10.3 Reclaim Mannequins
+### 11.3 Reclaim Mannequins
 
 #### For GitHub Enterprise Cloud without Data Residency:
 
@@ -375,4 +319,42 @@ gh ado2gh reclaim-mannequin --github-org "{github-org}" --csv $CSV_FILE --skip-i
 - Reclaim mannequins by mapping them to the correct GitHub users. (Update the Mannequin CSV with Target User)
 ```
 gh ado2gh reclaim-mannequin --github-org "{github-org}" --csv $CSV_FILE --skip-invitation --target-api-url https://api.SUBDOMAIN.ghe.com
+```
+## 12. Appendix
+### 12.1 Install GH CLI
+- Install GitHub CLI by following the link below
+```
+https://github.com/cli/cli#installation
+```
+
+### 12.2 Install GH CLI extensions
+- Install gh-gitlab-stats CLI extension by running below command. This extension is required for generating inventory reports.
+```
+gh extension install https://github.com/mona-actions/gh-gitlab-stats
+```
+- Install gh-migration-monitor CLI extension by running below command. This extension is required to monitor the status of migrations.
+```
+gh extension install https://github.com/mona-actions/gh-migration-monitor
+```
+- Install the gh-ado2gh CLI extension. This extension is required to generate mannequins (user identity mapping) CSV files, reclaim mannequins, and wait for/check the migration status.
+```
+gh extension install https://github.com/github/gh-ado2gh
+```
+
+### 12.3 Build gl-exporter Docker Image
+- Copy gl_exporter folder to the server where the migration commands will be executed.
+- Build the `gl-exporter` Docker image using the `docker build` command
+```bash
+cd gl_exporter
+sudo docker build --no-cache=true -t gl-exporter .
+```
+- Verify the image creation using the `docker images` command.
+
+**Example output:**
+
+```bash
+root@GLMigration:/opt/migration2ghscripts_new# docker images
+REPOSITORY    TAG       IMAGE ID       CREATED        SIZE
+gl-exporter   latest    5e168437a7a1   12 hours ago   1.51GB
+ruby          3.2.1     3440a912810a   2 years ago    893MB
 ```
