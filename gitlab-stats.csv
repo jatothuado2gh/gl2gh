@@ -1,2 +1,3 @@
 Namespace,Project,Commit_Count,Branch_Count,Full_URL,github_org,github_repo
-migration-demo-group,Music-Player,72,3,http://myglserver.company.com/migration-demo-group/music-player,my-org,music-player
+test-migration,test-project,2,1,https://code.siemens.com/test-migration/test-project,OSES-Migration,DryRun-test-project3
+test-migration,test-project2,1,1,https://code.siemens.com/test-migration/test-project2,OSES-Migration,DryRun-test-project4
