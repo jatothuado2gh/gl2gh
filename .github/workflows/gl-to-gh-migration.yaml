@@ -918,6 +918,7 @@ jobs:
           echo " - output_files/migration-outputs_*.csv"
           echo
           echo "Click 'Review deployments' → Approve to continue."
+
   # ------------------ 6) Monitor Repository Migrations ------------------
   monitor-repository-migrations:
     name: monitor-repository-migrations
@@ -939,35 +940,39 @@ jobs:
           name: start-repository-migration-artifacts
           path: .
   
-      # ✅ FIX 1: AUTH (THIS WAS MISSING)
+      # ✅ AUTH
       - name: Authenticate GitHub CLI
         shell: bash
         run: |
           set -euo pipefail
   
-          echo "========================================"
-          echo "Authenticating GitHub CLI"
-          echo "========================================"
-  
-          [[ -n "${GH_PAT:-}" ]] || { echo "[ERROR] GH_PAT missing"; exit 1; }
-          [[ -n "${GH_HOST:-}" ]] || { echo "[ERROR] GH_HOST missing"; exit 1; }
-  
-          echo "[INFO] GH_HOST: $GH_HOST"
+          echo "Authenticating to GH_HOST: $GH_HOST"
   
           unset GH_TOKEN
           echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
   
           gh auth status
   
+      # ✅ MONITOR
       - name: Monitor Migrations
         shell: bash
         run: |
+          set -euo pipefail
+  
           echo "========================================"
           echo "# Monitor Repository Migrations"
           echo "========================================"
-          set -euo pipefail
   
-          # ✅ FIX 2: Correct CSV
+          # ✅ FIX: Determine correct API URL
+          if [[ "$GH_HOST" == "github.com" ]]; then
+            TARGET_API_URL="https://api.github.com"
+          else
+            TARGET_API_URL="https://api.$GH_HOST"
+          fi
+  
+          echo "[INFO] TARGET_API_URL: $TARGET_API_URL"
+  
+          # ✅ Correct CSV
           CSV_FILE=$(ls output_files/migration-outputs_*.csv | head -n1)
   
           [[ -f "$CSV_FILE" ]] || {
@@ -991,7 +996,6 @@ jobs:
   
           echo "github_org,github_repository,migration_id,status" > "$OUTPUT_FILE"
   
-          # ✅ FIX 3: Use correct columns + API URL
           tail -n +2 "$CSV_FILE" | \
           awk -F',' '{print $3","$4","$6}' | \
           xargs -I {} -P "$PARALLEL" bash -c '
@@ -1005,9 +1009,10 @@ jobs:
   
             OUTPUT=$(gh ado2gh wait-for-migration \
               --migration-id "$migration" \
-              --target-api-url "$GH_HOST" 2>&1)
+              --target-api-url "'"$TARGET_API_URL"'" 2>&1)
   
-            # ✅ FIX 4: Proper detection
+            echo "$OUTPUT"
+  
             if echo "$OUTPUT" | grep -Ei "completed successfully|migration.*completed"; then
               STATUS="COMPLETED"
             elif echo "$OUTPUT" | grep -Ei "failed|error"; then
@@ -1029,30 +1034,7 @@ jobs:
           echo "Migration Monitoring Summary"
           echo "========================================"
   
-          TOTAL=0
-          SUCCESS=0
-          FAILED=0
-          UNKNOWN=0
-  
-          while IFS=',' read -r org repo migration status; do
-            [[ "$org" == "github_org" ]] && continue
-  
-            TOTAL=$((TOTAL+1))
-  
-            case "$status" in
-              COMPLETED) SUCCESS=$((SUCCESS+1)) ;;
-              FAILED) FAILED=$((FAILED+1)) ;;
-              *) UNKNOWN=$((UNKNOWN+1)) ;;
-            esac
-          done < "$OUTPUT_FILE"
-  
-          echo "Total     : $TOTAL"
-          echo "Completed : $SUCCESS"
-          echo "Failed    : $FAILED"
-          echo "Unknown   : $UNKNOWN"
-  
-          echo
-          column -s, -t "$OUTPUT_FILE"
+          cat "$OUTPUT_FILE" | column -s, -t
   
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
