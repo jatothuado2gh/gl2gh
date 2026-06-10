@@ -939,14 +939,20 @@ jobs:
         with:
           name: start-repository-migration-artifacts
           path: .
-  
-      # ✅ AUTH
+      
       - name: Authenticate GitHub CLI
         shell: bash
         run: |
           set -euo pipefail
   
-          echo "Authenticating to GH_HOST: $GH_HOST"
+          echo "========================================"
+          echo "Authenticating GitHub CLI"
+          echo "========================================"
+  
+          [[ -n "${GH_PAT:-}" ]] || { echo "[ERROR] GH_PAT missing"; exit 1; }
+          [[ -n "${GH_HOST:-}" ]] || { echo "[ERROR] GH_HOST missing"; exit 1; }
+  
+          echo "[INFO] GH_HOST: $GH_HOST"
   
           unset GH_TOKEN
           echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
