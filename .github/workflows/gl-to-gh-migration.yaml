@@ -743,9 +743,9 @@ jobs:
             output_files/
             logs/
 
-  # ------------------ 6) Display Final Summary ------------------
-  display-final-summary:
-    name: display-final-summary
+  # ------------------ 6) Display migration Summary ------------------
+  display-migration-summary:
+    name: display-migration-summary
     runs-on: ["${{ inputs.RUNNER_LABEL }}"]
     needs: [pre-migration-readiness-check, generate-migration-archives, upload-migration-archives, start-repository-migration]
     steps:
@@ -891,3 +891,99 @@ jobs:
             final-migration-summary.txt
             output_files/
             logs/
+
+  # ------------------ Approve before Monitoring ------------------
+  approve-before-monitoring:
+    name: approve-before-monitoring
+    runs-on: ["${{ inputs.RUNNER_LABEL }}"]
+    needs: [start-repository-migration,display-migration-summary]
+    environment:
+      name: approve-after-readiness-check   # ✅ MUST configure in GitHub UI
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: start-repository-migration-artifacts
+          path: .
+  
+      - name: Approval Step
+        shell: bash
+        run: |
+          echo "===================================="
+          echo "MANUAL APPROVAL REQUIRED"
+          echo "===================================="
+          echo
+          echo "Review before monitoring:"
+          echo " - start-gl2gh-repo-migration.out"
+          echo " - output_files/migration-outputs_*.csv"
+          echo
+          echo "Click 'Review deployments' → Approve to continue."
+
+  # ------------------ 6) Monitor Repository Migrations ------------------
+  monitor-repository-migrations:
+    name: monitor-repository-migrations
+    runs-on: ["${{ inputs.RUNNER_LABEL }}"]
+    needs: [approve-before-monitoring]
+  
+    env:
+      GH_PAT: ${{ secrets.GH_PAT }}
+      GH_HOST: ${{ vars.GH_HOST }}
+  
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+  
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: start-repository-migration-artifacts
+          path: .
+  
+      # ✅ Auth
+      - name: Authenticate GitHub CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset GH_TOKEN
+          echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
+          gh auth status
+  
+      # ✅ Install extension (CRITICAL)
+      - name: Install gh-ado2gh extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh extension install https://github.com/github/gh-ado2gh || \
+          gh extension upgrade gh-ado2gh
+          gh extension list
+  
+      # ✅ Run your script
+      - name: Run Monitoring Script
+        shell: bash
+        run: |
+          set -euo pipefail
+  
+          # ✅ Derive API URL once
+          if [[ "$GH_HOST" == "github.com" ]]; then
+            export TARGET_API_URL="https://api.github.com"
+          else
+            export TARGET_API_URL="https://api.$GH_HOST"
+          fi
+  
+          echo "[INFO] TARGET_API_URL: $TARGET_API_URL"
+  
+          # ✅ Identify correct CSV
+          export CSV_FILE=$(ls output_files/migration-outputs_*.csv | head -n1)
+  
+          echo "[INFO] CSV_FILE: $CSV_FILE"
+  
+          chmod +x ./polling_monitoring.sh
+          ./polling_monitoring.sh
+  
+      - name: Upload artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: monitor-repository-migrations-artifacts
+          retention-days: 7
+          path: |
+            migration-status.csv
