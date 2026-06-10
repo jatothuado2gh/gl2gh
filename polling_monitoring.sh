@@ -120,7 +120,7 @@ while kill -0 "$MONITOR_PID" 2>/dev/null; do
   echo "Total     : $TOTAL_MIGRATIONS"
   echo "Completed : $completed"
   echo "Failed    : $failed"
-  echo "Pending   : $pending"
+  echo "InProgress   : $pending"
   echo "======================================"
 
   sleep "$INTERVAL"
