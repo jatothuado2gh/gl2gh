@@ -927,7 +927,6 @@ jobs:
   
     env:
       GH_PAT: ${{ secrets.GH_PAT }}
-      GH_TOKEN: ${{ secrets.GH_PAT }}
       GH_HOST: ${{ vars.GH_HOST }}
   
     steps:
@@ -939,18 +938,12 @@ jobs:
         with:
           name: start-repository-migration-artifacts
           path: .
-      
+  
+      # ✅ 1. AUTHENTICATE
       - name: Authenticate GitHub CLI
         shell: bash
         run: |
           set -euo pipefail
-  
-          echo "========================================"
-          echo "Authenticating GitHub CLI"
-          echo "========================================"
-  
-          [[ -n "${GH_PAT:-}" ]] || { echo "[ERROR] GH_PAT missing"; exit 1; }
-          [[ -n "${GH_HOST:-}" ]] || { echo "[ERROR] GH_HOST missing"; exit 1; }
   
           echo "[INFO] GH_HOST: $GH_HOST"
   
@@ -959,7 +952,23 @@ jobs:
   
           gh auth status
   
-      # ✅ MONITOR
+      # ✅ 2. INSTALL EXTENSION (CRITICAL FIX)
+      - name: Install gh-ado2gh extension
+        shell: bash
+        run: |
+          set -euo pipefail
+  
+          echo "Installing gh-ado2gh..."
+  
+          gh extension install https://github.com/github/gh-ado2gh || \
+          gh extension upgrade gh-ado2gh
+  
+          gh extension list | grep ado2gh || {
+            echo "[ERROR] gh-ado2gh extension not found"
+            exit 1
+          }
+  
+      # ✅ 3. MONITOR
       - name: Monitor Migrations
         shell: bash
         run: |
@@ -969,7 +978,7 @@ jobs:
           echo "# Monitor Repository Migrations"
           echo "========================================"
   
-          # ✅ FIX: Determine correct API URL
+          # ✅ Correct API URL
           if [[ "$GH_HOST" == "github.com" ]]; then
             TARGET_API_URL="https://api.github.com"
           else
@@ -1040,7 +1049,7 @@ jobs:
           echo "Migration Monitoring Summary"
           echo "========================================"
   
-          cat "$OUTPUT_FILE" | column -s, -t
+          column -s, -t "$OUTPUT_FILE"
   
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -1048,4 +1057,4 @@ jobs:
           name: monitor-repository-migrations-artifacts
           retention-days: 7
           path: |
-            migration-status.csv        
+            migration-status.csv
