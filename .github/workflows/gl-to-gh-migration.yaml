@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ENVIRONMENT_NAME:
-        description: "GitHub Environment name containing this client's vars and secrets"
+        description: "GitHub Environment name containing vars and secrets"
         type: string
         required: true
       INVENTORY_FILE:
